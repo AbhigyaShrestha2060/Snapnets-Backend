@@ -31,7 +31,6 @@ connectDatabase();
 
 // Defining the port
 const PORT = process.env.PORT;
-console.log(__dirname);
 
 // Making a test endpoint
 // Endpoints : POST, GET, PUT , DELETE
@@ -43,6 +42,11 @@ app.use(express.static('public'));
 
 app.use('/api/user', require('./routes/userRoutes'));
 app.use('/api/image', require('./routes/imageRoutes'));
+app.use('/api/balance', require('./routes/balanceRoutes'));
+app.use('/api/bid', require('./routes/bidRoutes'));
+app.use('/api/comment', require('./routes/commentRoutes'));
+app.use('/api/board', require('./routes/boardRoutes'));
+app.use('/api/followers', require('./routes/followerRoutes'));
 
 const server = http.createServer(app);
 

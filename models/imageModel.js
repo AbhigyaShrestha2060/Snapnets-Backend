@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const imageSchema = new mongoose.Schema({
   image: {
@@ -25,12 +25,31 @@ const imageSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  likedBy: {
+    type: [String],
+    default: [],
+  },
   uploadedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'users',
     required: true,
   },
+  comments: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'comments',
+    },
+  ],
+  keywords: {
+    type: [String],
+    default: [],
+    index: true, // Index for optimized search
+  },
+  isReadyToBid: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const Images = mongoose.model('images', imageSchema);
-module.exports = Images;
+export default Images;

@@ -13,6 +13,7 @@ const userSchema = new mongoose.Schema({
   password: {
     type: String,
     required: true,
+    default: null,
   },
   phoneNumber: {
     type: String,
@@ -30,6 +31,14 @@ const userSchema = new mongoose.Schema({
   profilePicture: {
     type: String,
     default: null,
+  },
+  googleId: {
+    type: String,
+    default: null,
+  },
+  isGoogleUser: {
+    type: Boolean,
+    default: false,
   },
 });
 
