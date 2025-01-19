@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import Follower from '../models/followersModel.js';
 
 export const followUser = async (req, res) => {
-  const { userId } = req.user; // Extracting user from token
+  const { id } = req.user; // Extracting user from token
   const { followUserId } = req.body;
 
   if (!followUserId) {
@@ -21,7 +21,7 @@ export const followUser = async (req, res) => {
     }
 
     // Prevent users from following themselves
-    if (userId === followUserId) {
+    if (id === followUserId) {
       return res.status(400).json({
         success: false,
         message: 'User cannot follow themselves',
@@ -31,7 +31,7 @@ export const followUser = async (req, res) => {
     // Check if the follow relationship already exists
     const existingFollow = await Follower.findOne({
       user: followUserId,
-      follower: userId,
+      follower: id,
     });
     if (existingFollow) {
       return res.status(400).json({
@@ -41,7 +41,7 @@ export const followUser = async (req, res) => {
     }
 
     // Create a new follow relationship
-    const follow = new Follower({ user: followUserId, follower: userId });
+    const follow = new Follower({ user: followUserId, follower: id });
     await follow.save();
 
     res.status(201).json({
@@ -59,7 +59,7 @@ export const followUser = async (req, res) => {
 };
 
 export const unfollowUser = async (req, res) => {
-  const { userId } = req.user; // Extracting user from token
+  const { id } = req.user; // Extracting user from token
   const { unfollowUserId } = req.body;
 
   if (!unfollowUserId) {
@@ -80,7 +80,7 @@ export const unfollowUser = async (req, res) => {
     // Check if the follow relationship exists
     const existingFollow = await Follower.findOneAndDelete({
       user: unfollowUserId,
-      follower: userId,
+      follower: id,
     });
     if (!existingFollow) {
       return res.status(404).json({
@@ -103,12 +103,12 @@ export const unfollowUser = async (req, res) => {
 };
 
 export const getFollowers = async (req, res) => {
-  const { userId } = req.user; // Extracting user from token
+  const { id } = req.user.id; // Extracting user from token
 
   try {
-    const followers = await Follower.find({ user: userId }).populate(
+    const followers = await Follower.find({ user: id }).populate(
       'follower',
-      'name email'
+      'username email profilePicture'
     );
     res.status(200).json({
       success: true,
@@ -125,12 +125,12 @@ export const getFollowers = async (req, res) => {
 };
 
 export const getFollowing = async (req, res) => {
-  const { userId } = req.user; // Extracting user from token
+  const { id } = req.user.id; // Extracting user from token
 
   try {
-    const following = await Follower.find({ follower: userId }).populate(
+    const following = await Follower.find({ follower: id }).populate(
       'user',
-      'name email'
+      'username email profilePicture'
     );
     res.status(200).json({
       success: true,

@@ -9,5 +9,6 @@ router.put('/editProfilePicture', authGuard, userController.editProfilePicture);
 router.get('/getMe', authGuard, userController.getMe);
 router.put('/changePassword', authGuard, userController.changePassword);
 router.post('/googleLogin', userController.googleLogin);
+router.get('/getAllUsers', userController.getAllUsers);
 
 module.exports = router;

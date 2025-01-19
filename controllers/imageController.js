@@ -91,7 +91,7 @@ export const getImageById = async (req, res) => {
   try {
     const image = await imageModel
       .findById(req.params.id)
-      .populate('uploadedBy', 'username');
+      .populate('uploadedBy', 'username profilePicture');
 
     if (!image) {
       return res.status(404).json({

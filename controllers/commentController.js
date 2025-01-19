@@ -1,3 +1,4 @@
+import moment from 'moment';
 import Comments from '../models/commentModel.js';
 import Images from '../models/imageModel.js';
 
@@ -58,35 +59,69 @@ export const addCommentToImage = async (req, res) => {
     });
   }
 };
+
 export const getCommentsForImage = async (req, res) => {
   try {
-    // 2. Fetch the image by imageId
-    const image = await Images.findById(req.params.id);
-    if (!image) {
+    // Fetch the image by imageId and populate uploader and comments
+    const populatedImage = await Images.findById(req.params.id)
+      .populate({
+        path: 'uploadedBy', // Populate the uploader's details
+        select: 'username email profilePicture', // Select specific fields for uploader
+      })
+      .populate({
+        path: 'comments',
+        populate: {
+          path: 'commentedBy', // Populate the user who commented
+          select: 'username email profilePicture', // Select specific fields for the commenter
+        },
+        options: {
+          sort: { commentDate: -1 }, // Sort comments by commentDate (descending)
+        },
+      })
+      .exec();
+
+    // Check if the image exists
+    if (!populatedImage) {
       return res.status(404).json({
         success: false,
         message: 'Image not found!',
       });
     }
 
-    // 3. Populate the comments with actual comment data and sort by commentDate (including time)
-    const populatedImage = await Images.findById(req.params.id)
-      .populate({
-        path: 'comments',
-        populate: {
-          path: 'commentedBy', // Populate the user info who commented
-          select: 'username email profilePicture', // Select fields to return for the user (e.g., username, email)
-        },
-        options: {
-          sort: { commentDate: -1 }, // Sort comments by commentDate (descending, latest first)
-        },
-      })
-      .exec();
+    // Format comments with properly formatted dates
+    const formattedComments = populatedImage.comments.map((comment) => ({
+      id: comment._id,
+      comment: comment.comment,
+      commentedBy: comment.commentedBy,
+      commentDate: moment(comment.commentDate).format('YYYY-MM-DD HH:mm:ss'), // Format comment date
+    }));
 
-    // 4. Return the image with populated comments
+    // Format the uploaded date
+    const formattedUploadedDate = moment(populatedImage.uploadDate).format(
+      'YYYY-MM-DD HH:mm:ss'
+    ); // Format upload date
+
+    // Check if the current user has liked the image
+    const hasLiked = populatedImage.likedBy.includes(req.user.id);
+
+    // Return the image with all its details, uploader, like status, and comments
     res.status(200).json({
       success: true,
-      image: populatedImage,
+      image: {
+        id: populatedImage._id,
+        imageTitle: populatedImage.imageTitle,
+        imageDescription: populatedImage.imageDescription,
+        image: populatedImage.image, // Image URL or path
+        totalLikes: populatedImage.totalLikes, // Number of likes
+        likedBy: populatedImage.likedBy, // Users who liked the image
+        keywords: populatedImage.keywords, // Keywords associated with the image
+        isPortrait: populatedImage.isPortrait, // Whether the image is portrait
+        isReadyToBid: populatedImage.isReadyToBid, // Image availability for bidding
+        uploadedBy: populatedImage.uploadedBy, // Include uploader details
+        uploadedDate: formattedUploadedDate, // Include formatted uploaded date
+        hasLiked: hasLiked, // New field to indicate if the current user has liked the image
+        comments: formattedComments, // Include formatted comments
+      },
     });
   } catch (error) {
     console.error(error);

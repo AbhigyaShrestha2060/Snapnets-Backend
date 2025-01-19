@@ -399,3 +399,39 @@ export const googleLogin = async (req, res) => {
     });
   }
 };
+export const getAllUsers = async (req, res) => {
+  try {
+    // Fetch all users from the database
+    const users = await userModel.find();
+
+    // If no users are found, send a response
+    if (!users || users.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No users found',
+      });
+    }
+
+    // Send the response with the list of users
+    res.status(200).json({
+      success: true,
+      message: 'Users fetched successfully',
+      users: users.map((user) => ({
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        fullName: user.fullName,
+        phoneNumber: user.phoneNumber,
+        profilePicture: user.profilePicture,
+        isAdmin: user.isAdmin,
+        isGoogleUser: user.isGoogleUser,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
