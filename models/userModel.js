@@ -40,6 +40,14 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  followers: {
+    type: Array,
+    default: [],
+  },
+  following: {
+    type: Array,
+    default: [],
+  },
 });
 
 const User = mongoose.model('users', userSchema);

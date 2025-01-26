@@ -7,8 +7,11 @@ import userModel from '../models/userModel.js';
 // const { OAuth2Client } = require('google-auth-library');
 // const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 // const axios = require('axios');
+import crypto from 'crypto';
 import fs from 'fs';
+import nodemailer from 'nodemailer';
 import path from 'path';
+import Follower from '../models/followersModel.js'; // Import the Follower model
 
 export const createUser = async (req, res) => {
   console.log(req.body);
@@ -249,8 +252,24 @@ export const getMe = async (req, res) => {
         message: 'User not found',
       });
     }
+
+    // Get all followers of the user
+    const followers = await Follower.find({ user: user._id }).populate(
+      'follower',
+      'username email profilePicture'
+    );
+    const followersCount = followers.length;
+
+    // Get all users the user is following
+    const following = await Follower.find({ follower: user._id }).populate(
+      'user',
+      'username email profilePicture'
+    );
+    const followingCount = following.length;
+
     res.status(200).json({
       success: true,
+      message: 'User details retrieved successfully',
       user: {
         id: user._id,
         fullName: user.fullName,
@@ -260,10 +279,22 @@ export const getMe = async (req, res) => {
         isAdmin: user.isAdmin,
         profilePicture: user.profilePicture,
         isGoogleUser: user.isGoogleUser,
+        followersCount,
+        followingCount,
+        data: {
+          followers: {
+            list: followers,
+            count: followersCount,
+          },
+          following: {
+            list: following,
+            count: followingCount,
+          },
+        },
       },
     });
   } catch (error) {
-    console.log(error);
+    console.error(error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -432,6 +463,164 @@ export const getAllUsers = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+    });
+  }
+};
+export const getFollowersAndFollowing = async (req, res) => {
+  try {
+    // Fetch the user by ID
+    const user = await userModel.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    // Fetch details of all followers
+    const followers = await userModel
+      .find({ _id: { $in: user.followers } })
+      .select('id username email profilePicture');
+
+    // Fetch details of all following
+    const following = await userModel
+      .find({ _id: { $in: user.following } })
+      .select('id username email profilePicture');
+
+    // Send the response with followers and following data, including their counts
+    res.status(200).json({
+      success: true,
+      message: 'Followers and following fetched successfully',
+      data: {
+        followersCount: followers.length, // Count of followers
+        followingCount: following.length, // Count of following
+        followers,
+        following,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching followers and following:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// Request OTP for password reset
+export const requestPasswordReset = async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      message: 'Please provide an email!',
+    });
+  }
+
+  try {
+    const user = await userModel.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Email not registered!',
+      });
+    }
+
+    // Generate a random OTP
+    const otp = crypto.randomInt(100000, 999999).toString();
+
+    // Set OTP and expiry in the database
+    user.resetPasswordOTP = otp;
+    user.resetPasswordOTPExpiry = Date.now() + 15 * 60 * 1000; // OTP valid for 15 minutes
+    await user.save();
+
+    // Configure nodemailer transport
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    // Send the email
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: 'Password Reset OTP',
+      text: `Your OTP for password reset is: ${otp}. It will expire in 15 minutes.`,
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    res.status(200).json({
+      success: true,
+      message: 'OTP sent successfully to your email.',
+    });
+  } catch (error) {
+    console.error('Error during password reset request:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error.',
+    });
+  }
+};
+
+// Verify OTP and reset the password
+export const verifyResetOTP = async (req, res) => {
+  const { email, otp, newPassword } = req.body;
+
+  if (!email || !otp || !newPassword) {
+    return res.status(400).json({
+      success: false,
+      message: 'Please provide email, OTP, and new password!',
+    });
+  }
+
+  try {
+    const user = await userModel.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found!',
+      });
+    }
+
+    // Check if OTP matches and is not expired
+    if (
+      user.resetPasswordOTP !== otp ||
+      !user.resetPasswordOTPExpiry ||
+      user.resetPasswordOTPExpiry < Date.now()
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired OTP!',
+      });
+    }
+
+    // Hash the new password
+    const salt = await bcrypt.genSalt(10);
+    const hashedNewPassword = await bcrypt.hash(newPassword, salt);
+
+    // Update the user's password and clear OTP fields
+    user.password = hashedNewPassword;
+    user.resetPasswordOTP = null;
+    user.resetPasswordOTPExpiry = null;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Password reset successfully!',
+    });
+  } catch (error) {
+    console.error('Error during OTP verification:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error.',
     });
   }
 };

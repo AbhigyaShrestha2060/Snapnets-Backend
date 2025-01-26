@@ -4,7 +4,7 @@ const { authGuard } = require('../middleware/authGuard');
 
 router.post('/add', authGuard, imageController.addImage);
 router.get('/getAll', imageController.getAllImages);
-router.get('/get/:id', imageController.getImageById);
+router.get('/get/:id', authGuard, imageController.getImageById);
 router.delete('/delete/:id', imageController.deleteImage);
 router.post('/like/:id', authGuard, imageController.toggleImageLike);
 router.get(
@@ -26,7 +26,7 @@ router.get(
 
 router.put('/updateImage/:id', authGuard, imageController.editImage);
 
-router.get('/mostLikedImages', imageController.getAllImages);
+router.get('/mostLikedImages', imageController.getMostLikedImages);
 
 router.get(
   '/getAllImageOfAUserbyId/:userId',

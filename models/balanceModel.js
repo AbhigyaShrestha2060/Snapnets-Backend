@@ -9,6 +9,9 @@ const transactionSchema = new mongoose.Schema({
     type: Date,
     default: Date.now, // Automatically set to the current date and time
   },
+  pidx: {
+    type: String,
+  },
 });
 
 const balanceSchema = new mongoose.Schema({

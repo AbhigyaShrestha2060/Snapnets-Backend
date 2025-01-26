@@ -1,131 +1,189 @@
+const crypto = require('crypto');
 const {
   initializeKhaltiPayment,
   verifyKhaltiPayment,
 } = require('../service/khaltiService');
 const Payment = require('../models/paymentModel');
-const BookingModel = require('../models/bookingModel');
+const Balance = require('../models/balanceModel');
 
-// Route to initialize Khalti payment gateway
+// Helper function to hash sensitive data
+const hashSensitiveData = (data) =>
+  crypto.createHash('sha256').update(data).digest('hex');
+
+// Initialize Khalti payment
 const initializePayment = async (req, res) => {
-  console.log(req.body);
-
   try {
+    const userId = req.user.id;
     const { totalPrice, website_url } = req.body;
-    var booking = req.body.bookings;
-    var bookings = [];
-    var bookingIds = [];
-    if (req.body.bookingList) {
-      bookingIds = req.body.bookingList.map((b) => b.bikeId);
-    }
-    if (!bookings) {
-      bookings = bookingIds;
-    } else {
-      bookings = booking.map((b) => b.bikeId);
-    }
 
-    console.log(bookings);
-    // Extract product names from populated products array
-    const productNames = bookings.map((p) => p.bikeNumber).join(', ');
-
-    if (!productNames) {
-      return res.send({
+    // Validate inputs
+    if (!totalPrice || !website_url) {
+      return res.status(400).json({
         success: false,
-        message: 'No booking names found',
+        message: 'Missing required fields: totalPrice or website_url',
       });
     }
 
-    // Create a payment document without transactionId initially
-    const OrderModelData = await Payment.create({
-      bookings: bookings,
+    // Create payment record
+    const paymentRecord = await Payment.create({
+      user: userId,
       paymentGateway: 'khalti',
       amount: totalPrice,
-      status: 'pending', // Set the initial status to pending
+      status: 'pending',
     });
 
-    // Initialize the Khalti payment
-    const paymentInitate = await initializeKhaltiPayment({
-      amount: 10 * 100, // amount should be in paisa (Rs * 100)
-      purchase_order_id: OrderModelData._id, // purchase_order_id because we need to verify it later
-      purchase_order_name: productNames,
-      return_url: `http://localhost:3000/thankyou`, // Return URL where we verify the payment
+    const amountInPaisa = Math.round(totalPrice * 100);
+
+    // Call Khalti API to initialize the payment
+    const paymentResponse = await initializeKhaltiPayment({
+      amount: amountInPaisa,
+      purchase_order_id: paymentRecord._id.toString(),
+      purchase_order_name: `User Payment: ${userId}`,
+      return_url: `${process.env.BACKEND_URL}/api/payment/complete-khalti-payment`,
       website_url: website_url || 'http://localhost:3000',
     });
 
-    // Update the payment record with the transactionId and pidx
+    // Hash sensitive information
+    const hashedPidx = hashSensitiveData(paymentResponse.pidx);
+
+    // Update payment record with the response
     await Payment.updateOne(
-      { _id: OrderModelData._id },
+      { _id: paymentRecord._id },
       {
         $set: {
-          transactionId: paymentInitate.pidx, // Assuming pidx as transactionId from Khalti response
-          pidx: paymentInitate.pidx,
+          transactionId: hashedPidx,
+          pidx: hashedPidx,
         },
       }
     );
 
-    res.json({
+    res.status(200).json({
       success: true,
-      OrderModelData,
-      payment: paymentInitate,
-      pidx: paymentInitate.pidx,
+      message: 'Payment initialized successfully',
+      paymentRecord,
+      payment: paymentResponse,
+      url: paymentResponse.payment_url,
     });
   } catch (error) {
     console.error('Error initializing payment:', error);
-    res.json({
+    res.status(500).json({
       success: false,
-      error: error.message || 'An error occurred',
+      message: 'Internal server error',
     });
   }
 };
 
-// This is our return URL where we verify the payment done by the user
+// Complete Khalti payment
 const completeKhaltiPayment = async (req, res) => {
-  console.log(req.query);
-  const { pidx, amount } = req.query;
-  const purchase_order_id = req.query.purchase_order_id || req.query.productId;
-
   try {
-    const paymentInfo = await verifyKhaltiPayment(pidx);
-    console.log(paymentInfo);
+    const { pidx, amount, purchase_order_id } = req.query;
 
-    // Validate the payment info
+    // Verify payment with Khalti
+    const paymentInfo = await verifyKhaltiPayment(pidx);
+
     if (
-      paymentInfo?.status !== 'Completed' || // Ensure the status is "Completed"
-      paymentInfo.pidx !== pidx || // Verify pidx matches
-      Number(paymentInfo.total_amount) !== Number(amount) // Compare the total amount
+      !paymentInfo ||
+      paymentInfo.status !== 'Completed' ||
+      Number(paymentInfo.total_amount) !== Number(amount)
     ) {
       return res.status(400).json({
         success: false,
-        message: 'Incomplete or invalid payment information',
-        paymentInfo,
+        message: 'Payment verification failed',
       });
     }
-    // Update payment record with verification data
-    const paymentData = await Payment.findOneAndUpdate(
+
+    const hashedPidx = hashSensitiveData(pidx);
+
+    // Update payment record
+    const updatedPayment = await Payment.findOneAndUpdate(
       { _id: purchase_order_id },
       {
         $set: {
-          pidx,
-          transactionId: paymentInfo.transaction_id,
+          pidx: hashedPidx,
+          transactionId: hashSensitiveData(paymentInfo.transaction_id),
           status: 'success',
         },
       },
       { new: true }
     );
 
+    if (!updatedPayment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment record not found',
+      });
+    }
+
+    // Redirect to the success page
+    const successPageUrl = `http://localhost:3000/payment-success?pidx=${hashedPidx}&orderId=${purchase_order_id}&amount=${amount}`;
+    res.redirect(successPageUrl);
+  } catch (error) {
+    console.error('Error completing payment:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// Verify Khalti payment manually
+const verifyKhalti = async (req, res) => {
+  try {
+    const { pidx, amount, purchase_order_id } = req.query;
+
+    // Verify payment with Khalti
+    const paymentInfo = await verifyKhaltiPayment(pidx);
+
+    if (
+      !paymentInfo ||
+      paymentInfo.status !== 'Completed' ||
+      Number(paymentInfo.total_amount) !== Number(amount)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment verification failed',
+        paymentInfo,
+      });
+    }
+
+    const hashedPidx = hashSensitiveData(pidx);
+
+    // Update payment record
+    const updatedPayment = await Payment.findOneAndUpdate(
+      { _id: purchase_order_id },
+      {
+        $set: {
+          pidx: hashedPidx,
+          transactionId: hashSensitiveData(paymentInfo.transaction_id),
+          status: 'success',
+        },
+      },
+      { new: true }
+    );
+
+    if (!updatedPayment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment record not found',
+      });
+    }
+
     res.status(200).json({
       success: true,
-      message: 'Payment Successful',
-      paymentData,
-      transactionId: paymentInfo.transaction_id,
+      message: 'Payment verified successfully',
+      paymentData: updatedPayment,
     });
   } catch (error) {
     console.error('Error verifying payment:', error);
     res.status(500).json({
       success: false,
-      message: 'An error occurred during payment verification',
-      error: error.message || 'An unknown error occurred',
+      message: 'Internal server error',
     });
   }
 };
 
-module.exports = { initializePayment, completeKhaltiPayment };
+module.exports = {
+  initializePayment,
+  completeKhaltiPayment,
+  verifyKhalti,
+};

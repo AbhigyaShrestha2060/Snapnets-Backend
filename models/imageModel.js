@@ -43,11 +43,28 @@ const imageSchema = new mongoose.Schema({
   keywords: {
     type: [String],
     default: [],
-    index: true, // Index for optimized search
+    index: true,
   },
   isReadyToBid: {
     type: Boolean,
     default: false,
+  },
+  biddingStartDate: {
+    type: Date,
+    default: null,
+  },
+  biddingEndDate: {
+    type: Date,
+    default: null,
+  },
+  isBidSold: {
+    type: Boolean,
+    default: false,
+  },
+  soldTo: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'users',
+    default: null,
   },
 });
 

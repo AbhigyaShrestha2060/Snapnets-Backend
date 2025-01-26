@@ -4,7 +4,7 @@ import Balance from '../models/balanceModel.js';
 export const updateUserBalance = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { amount } = req.body;
+    const { amount, pidx } = req.body;
 
     if (!amount || isNaN(amount)) {
       return res.status(400).json({
@@ -16,15 +16,37 @@ export const updateUserBalance = async (req, res) => {
     let balance = await Balance.findOne({ user: userId });
 
     if (balance) {
-      // Update the balance and add a new transaction
+      // Check if the pidx is already present in the transactions array
+      const pidxExists = balance.transactions.some(
+        (transaction) => transaction.pidx === pidx
+      );
+      if (pidxExists) {
+        return res.status(400).json({
+          success: false,
+          message: 'Transaction already exists',
+        });
+      }
+
+      // Update the balance and add the transaction
       balance.balance += parseFloat(amount);
-      balance.transactions.push({ amount: parseFloat(amount) });
+      const newTransaction = {
+        amount: parseFloat(amount),
+        pidx,
+        transactionDate: new Date(),
+      };
+      balance.transactions.push(newTransaction);
       await balance.save();
     } else {
       // Create a new balance document with the initial transaction
       balance = new Balance({
         balance: parseFloat(amount),
-        transactions: [{ amount: parseFloat(amount) }],
+        transactions: [
+          {
+            amount: parseFloat(amount),
+            pidx,
+            transactionDate: new Date(),
+          },
+        ],
         user: userId,
       });
       await balance.save();
@@ -49,7 +71,7 @@ export const updateUserBalance = async (req, res) => {
 export const getAllUsersWithBalances = async (req, res) => {
   try {
     const usersWithBalances = await Balance.find()
-      .populate('user', 'username email phoneNumber profilePicture') // Populate with user details (adjust fields as needed)
+      .populate('user', 'username email phoneNumber profilePicture')
       .exec();
 
     res.status(200).json({
@@ -70,7 +92,6 @@ export const withdrawUserBalance = async (req, res) => {
     const userId = req.user.id;
     const { amount } = req.body;
 
-    // Validate the input amount
     if (!amount || isNaN(amount) || amount <= 0) {
       return res.status(400).json({
         success: false,
@@ -78,7 +99,6 @@ export const withdrawUserBalance = async (req, res) => {
       });
     }
 
-    // Find the user's balance
     const balance = await Balance.findOne({ user: userId });
 
     if (!balance) {
@@ -88,7 +108,6 @@ export const withdrawUserBalance = async (req, res) => {
       });
     }
 
-    // Check if the user has sufficient balance
     if (balance.balance < amount) {
       return res.status(400).json({
         success: false,
@@ -96,9 +115,11 @@ export const withdrawUserBalance = async (req, res) => {
       });
     }
 
-    // Deduct the amount and add a withdrawal transaction
     balance.balance -= parseFloat(amount);
-    balance.transactions.push({ amount: -parseFloat(amount) }); // Record as a negative amount
+    balance.transactions.push({
+      amount: -parseFloat(amount),
+      transactionDate: new Date(),
+    });
     await balance.save();
 
     res.status(200).json({
@@ -122,7 +143,7 @@ export const getUserBalanceWithTransactions = async (req, res) => {
     const userId = req.user.id;
 
     const balance = await Balance.findOne({ user: userId })
-      .populate('user', 'username email phoneNumber') // Populate specific user fields
+      .populate('user', 'username email phoneNumber')
       .exec();
 
     if (!balance) {
@@ -132,13 +153,12 @@ export const getUserBalanceWithTransactions = async (req, res) => {
       });
     }
 
-    // Format transaction dates and include type (Deposit/Withdrawal)
     const formattedTransactions = balance.transactions.map((transaction) => ({
       amount: transaction.amount,
       type: transaction.amount > 0 ? 'Deposit' : 'Withdrawal',
       transactionDate: new Date(transaction.transactionDate).toLocaleDateString(
         'en-GB'
-      ), // dd/mm/yyyy
+      ),
     }));
 
     res.status(200).json({

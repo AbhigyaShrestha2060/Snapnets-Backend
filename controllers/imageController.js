@@ -1,6 +1,9 @@
+import moment from 'moment';
 import path from 'path';
+import Bids from '../models/bidModel.js';
 import imageModel from '../models/imageModel.js';
 import userModel from '../models/userModel.js';
+import { createNotification } from './notificationController.js';
 
 export const addImage = async (req, res) => {
   const { title, description, isPortrait, keywords } = req.body;
@@ -91,7 +94,8 @@ export const getImageById = async (req, res) => {
   try {
     const image = await imageModel
       .findById(req.params.id)
-      .populate('uploadedBy', 'username profilePicture');
+      .populate('uploadedBy', 'username profilePicture')
+      .populate('comments');
 
     if (!image) {
       return res.status(404).json({
@@ -100,10 +104,28 @@ export const getImageById = async (req, res) => {
       });
     }
 
+    // Get latest bid for this image
+    const latestBid = await Bids.findOne({ image: req.params.id })
+      .sort({ createdAt: -1 })
+      .populate('user', 'username');
+
+    // Get user's bid if exists
+    const userBid = await Bids.findOne({
+      image: req.params.id,
+      user: req.user.id,
+    }).sort({ createdAt: -1 });
+
+    const hasLiked = image.likedBy.includes(req.user.id);
+
     res.status(200).json({
       success: true,
       message: 'Image fetched successfully',
       image: image,
+      hasLiked: hasLiked,
+      latestBid: latestBid,
+      userBid: userBid || { message: 'Not bid yet' },
+      biddingStartDate: image.biddingStartDate,
+      biddingEndDate: image.biddingEndDate,
     });
   } catch (error) {
     console.log(error);
@@ -113,7 +135,6 @@ export const getImageById = async (req, res) => {
     });
   }
 };
-
 export const deleteImage = async (req, res) => {
   try {
     const image = await imageModel.findById(req.params.id);
@@ -140,9 +161,7 @@ export const deleteImage = async (req, res) => {
 
 export const toggleImageLike = async (req, res) => {
   try {
-    // Access the authenticated user's ID from the token
     const userId = req.user.id;
-    console.log('userId', userId);
 
     const image = await imageModel.findById(req.params.id);
     if (!image) {
@@ -152,32 +171,44 @@ export const toggleImageLike = async (req, res) => {
       });
     }
 
-    // Check if the user has already liked the image
     const userIndex = image.likedBy.indexOf(userId);
 
     if (userIndex !== -1) {
-      // User has already liked the image, so unlike it
-      image.likedBy.splice(userIndex, 1); // Remove userId from likedBy array
-      image.totalLikes -= 1; // Decrement like count
-      await image.save();
-
-      return res.status(200).json({
-        success: true,
-        message: 'Image unliked successfully',
-        likes: image.totalLikes,
-      });
+      image.likedBy.splice(userIndex, 1);
+      image.totalLikes -= 1;
     } else {
-      // User has not liked the image, so like it
-      image.likedBy.push(userId); // Add userId to likedBy array
-      image.totalLikes += 1; // Increment like count
-      await image.save();
+      image.likedBy.push(userId);
+      image.totalLikes += 1;
 
-      return res.status(200).json({
-        success: true,
-        message: 'Image liked successfully',
-        likes: image.totalLikes,
-      });
+      if (image.totalLikes === 5 && !image.biddingStartDate) {
+        image.biddingStartDate = new Date();
+        image.biddingEndDate = moment().add(7, 'days').toDate(); // Bidding ends 7 days from start
+        image.isReadyToBid = true;
+      }
     }
+
+    await image.save();
+
+    const user = await userModel.findById(userId).select('username');
+
+    // notification for like
+    await createNotification(
+      'Your image has been liked',
+      `Your image "${image.imageTitle}" has been liked by ${user.username}`,
+      image.uploadedBy
+    );
+
+    res.status(200).json({
+      success: true,
+      message:
+        userIndex !== -1
+          ? 'Image unliked successfully'
+          : 'Image liked successfully',
+      likes: image.totalLikes,
+      isReadyToBid: image.isReadyToBid,
+      biddingStartDate: image.biddingStartDate,
+      biddingEndDate: image.biddingEndDate,
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({
@@ -189,22 +220,41 @@ export const toggleImageLike = async (req, res) => {
 
 export const getAllImagesWithLikeStatus = async (req, res) => {
   try {
-    // Access the authenticated user's ID from the token
     const userId = req.user.id;
 
-    // Fetch all images from the database
-    const images = await imageModel.find().populate('uploadedBy', 'username');
+    const images = await imageModel
+      .find()
+      .populate('uploadedBy', 'username')
+      .lean();
 
-    // Map over the images and include the like status for the authenticated user
-    const imagesWithLikeStatus = images.map((image) => ({
-      ...image.toObject(),
-      isLikedByUser: image.likedBy.includes(userId), // Check if the user ID is in the likedBy array
+    // Get latest bids for all images in one query
+    const latestBids = await Bids.aggregate([
+      {
+        $sort: { createdAt: -1 },
+      },
+      {
+        $group: {
+          _id: '$image',
+          latestBid: { $first: '$$ROOT' },
+        },
+      },
+    ]);
+
+    // Create a map of image ID to latest bid
+    const bidMap = new Map(
+      latestBids.map((item) => [item._id.toString(), item.latestBid])
+    );
+
+    const imagesWithBidsAndLikes = images.map((image) => ({
+      ...image,
+      isLikedByUser: image.likedBy.includes(userId),
+      latestBid: bidMap.get(image._id.toString()) || null,
     }));
 
     res.status(200).json({
       success: true,
-      message: 'All images fetched successfully with like status',
-      images: imagesWithLikeStatus,
+      message: 'Images fetched successfully with like status and latest bids',
+      images: imagesWithBidsAndLikes,
     });
   } catch (error) {
     console.error(error);
@@ -300,22 +350,29 @@ export const getImagesUploadedByUser = async (req, res) => {
     // Access the authenticated user's ID from the token
     const userId = req.user.id;
 
-    // Fetch all images uploaded by the user
+    // Fetch all images uploaded by the authenticated user
     const userImages = await imageModel
-      .find({ uploadedBy: userId }) // Filter images by the user ID in the uploadedBy field
-      .populate('uploadedBy', 'username'); // Optional: populate the uploadedBy field to get user information
+      .find({ uploadedBy: userId }) // Filter images by the authenticated user's ID
+      .populate('uploadedBy', 'username email profilePicture'); // Populate uploadedBy to get user details
 
     if (userImages.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'No images found uploaded by this user',
+        message: 'No images found uploaded by the authenticated user',
       });
     }
 
+    // Add metadata for total images and likes
+    const totalLikes = userImages.reduce(
+      (sum, image) => sum + (image.totalLikes || 0),
+      0
+    );
+
     res.status(200).json({
       success: true,
-      message: 'Images uploaded by the user fetched successfully',
-      total_userImages: userImages.length,
+      message: 'Images uploaded by the authenticated user fetched successfully',
+      totalImages: userImages.length,
+      totalLikes: totalLikes,
       images: userImages,
     });
   } catch (error) {
@@ -326,6 +383,7 @@ export const getImagesUploadedByUser = async (req, res) => {
     });
   }
 };
+
 export const editImage = async (req, res) => {
   const userId = req.user.id; // Retrieve user ID from the token
   const { id } = req.params; // Get the image ID from the URL params
@@ -386,15 +444,25 @@ export const editImage = async (req, res) => {
 
 export const getMostLikedImages = async (req, res) => {
   try {
-    const { limit = 10 } = req.query; // Allow a limit to be passed via query params, default to 10
+    const { limit = 4 } = req.query; // Default to 10 images if no limit is provided
+
+    // Convert the limit to an integer and validate it
+    const parsedLimit = parseInt(limit);
+    if (isNaN(parsedLimit) || parsedLimit <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid limit value. Limit must be a positive number.',
+      });
+    }
 
     // Find images sorted by totalLikes in descending order
     const mostLikedImages = await imageModel
       .find()
       .sort({ totalLikes: -1 }) // Sort by totalLikes in descending order
-      .limit(parseInt(limit)) // Limit the number of images fetched
-      .populate('uploadedBy', 'username'); // Optionally, populate the uploadedBy field
+      .limit(parsedLimit) // Limit the number of results
+      .populate('uploadedBy', 'username'); // Populate uploadedBy field with username
 
+    // Handle the case where no images are found
     if (!mostLikedImages.length) {
       return res.status(404).json({
         success: false,
@@ -405,13 +473,14 @@ export const getMostLikedImages = async (req, res) => {
     res.status(200).json({
       success: true,
       message: 'Most liked images fetched successfully',
-      images: mostLikedImages, // This will be an array of image objects
+      images: mostLikedImages,
     });
   } catch (error) {
-    console.error(error);
+    console.error('Error in getMostLikedImages:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+      error: error.message,
     });
   }
 };
