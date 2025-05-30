@@ -20,18 +20,18 @@ export const createBid = async (req, res) => {
     }
 
     // Check if bidding is active
-    const currentDate = new Date();
-    if (
-      !image.biddingStartDate ||
-      !image.biddingEndDate ||
-      currentDate < image.biddingStartDate ||
-      currentDate > image.biddingEndDate
-    ) {
-      return res.status(400).json({ message: 'Bidding period is not active' });
-    }
+    // const currentDate = new Date();
+    // if (
+    //   !image.biddingStartDate ||
+    //   !image.biddingEndDate ||
+    //   currentDate < image.biddingStartDate ||
+    //   currentDate > image.biddingEndDate
+    // ) {
+    //   return res.status(400).json({ message: 'Bidding period is not active' });
+    // }
 
     // Ensure the image has more than 3 likes
-    if (image.totalLikes <= 3) {
+    if (image.totalLikes <= 0) {
       return res.status(400).json({
         message:
           'This image cannot be bid on as it has less than or equal to 3 likes',

@@ -624,3 +624,48 @@ export const verifyResetOTP = async (req, res) => {
     });
   }
 };
+
+export const deleteUser = async (req, res) => {
+  try {
+    const { password } = req.body;
+
+    // Check if the password is provided
+    if (!password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password is required to delete the account',
+      });
+    }
+
+    // Find the user by ID
+    const user = await userModel.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    // Compare the provided password with the stored password hash
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: 'Incorrect password',
+      });
+    }
+
+    // Delete the user if the password matches
+    await userModel.findByIdAndDelete(req.user.id);
+    res.status(200).json({
+      success: true,
+      message: 'User deleted successfully',
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};

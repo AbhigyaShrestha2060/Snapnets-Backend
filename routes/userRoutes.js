@@ -18,5 +18,6 @@ router.get(
 );
 router.post('/resetPasswordEmail', userController.requestPasswordReset);
 router.post('/verifyResetOTP', userController.verifyResetOTP);
+router.delete('/deleteUser', authGuard, userController.deleteUser);
 
 module.exports = router;

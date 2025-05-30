@@ -1,8 +1,9 @@
 const mongoose = require('mongoose');
+require('dotenv').config();
 
 const connectDatabase = () => {
-  mongoose.connect('mongodb://127.0.0.1:27017/Snapnets').then(() => {
-    console.log('Database connected!');
+  mongoose.connect(process.env.DATABASE).then(() => {
+    console.log('✅ MongoDB connected');
   });
 };
 
