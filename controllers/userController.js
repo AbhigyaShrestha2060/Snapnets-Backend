@@ -1,18 +1,12 @@
-import bcrypt from 'bcrypt';
-import { OAuth2Client } from 'google-auth-library';
-import jwt from 'jsonwebtoken';
-import userModel from '../models/userModel.js';
-// const sentOtp = require('../service/sendOtp');
-// const sendEmail = require('../service/otpEmailService');
-// const { OAuth2Client } = require('google-auth-library');
-// const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
-// const axios = require('axios');
+import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import fs from 'fs';
+import { OAuth2Client } from 'google-auth-library';
+import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 import path from 'path';
 import Follower from '../models/followersModel.js'; // Import the Follower model
-
+import userModel from '../models/userModel.js';
 export const createUser = async (req, res) => {
   console.log(req.body);
   const { email, username, password } = req.body;
